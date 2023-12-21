@@ -1,179 +1,158 @@
 package com.sina.recordvideo
 
 import android.Manifest
-import android.annotation.SuppressLint
-import android.app.Dialog
-import android.content.Context
-import android.graphics.SurfaceTexture
-import android.hardware.camera2.*
-import android.media.MediaRecorder
+import android.content.ContentValues
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import android.os.Bundle
-import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
-import android.util.Size
-import android.view.Surface
-import android.widget.Button
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.view.Window
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FallbackStrategy
+import androidx.camera.video.MediaStoreOutputOptions
+import androidx.camera.video.Quality
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.Recorder
+import androidx.camera.video.Recording
+import androidx.camera.video.VideoCapture
+import androidx.camera.video.VideoRecordEvent
+import androidx.core.content.ContextCompat
+import androidx.core.content.PermissionChecker
 import androidx.fragment.app.DialogFragment
-import com.gun0912.tedpermission.PermissionListener
-import com.gun0912.tedpermission.normal.TedPermission
-import java.io.File
-import java.util.*
+import com.sina.recordvideo.databinding.FragmentCameraBinding
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
-class CameraDialogFragment : DialogFragment() {
-
-    private val TAG = "com.sina.recordvideo.CameraDialogFragment"
-
-    private lateinit var cameraManager: CameraManager
-    private var cameraDevice: CameraDevice? = null
-    private lateinit var mediaRecorder: MediaRecorder
-
-    private var cameraId: String? = null
-    private var surfaceTexture: SurfaceTexture? = null
-    private var previewSize: Size? = null
-    private var videoSize: Size? = null
-
-    private var isRecording = false
-
-    override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
-        val builder = AlertDialog.Builder(requireContext())
-        val inflater = requireActivity().layoutInflater
-        val view = inflater.inflate(R.layout.dialog_fragment_camera, null)
-
-        val btnRecord = view.findViewById<Button>(R.id.btn_record)
-        btnRecord.setOnClickListener {
-            if (isRecording) {
-                stopRecording()
-            } else {
-                startRecording()
-            }
-        }
-
-        checkPermissions()
-
-        return builder.setView(view).create()
-    }
-
-    private fun checkPermissions() {
-        TedPermission.create()
-            .setPermissionListener(object : PermissionListener {
-                override fun onPermissionGranted() {
-                    initCamera()
-                }
-
-                override fun onPermissionDenied(deniedPermissions: List<String>) {
-                    Toast.makeText(requireContext(), "Permission denied", Toast.LENGTH_SHORT).show()
-                }
-            })
-            .setDeniedMessage("If you deny the permission, you will not be able to use the camera.")
-            .setPermissions(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
-            .check()
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun initCamera() {
-        cameraManager = requireActivity().getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        cameraId = cameraManager.cameraIdList[0]
-
-        val characteristics = cameraManager.getCameraCharacteristics(cameraId!!)
-        previewSize = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-            ?.getOutputSizes(SurfaceTexture::class.java)
-            ?.maxByOrNull { it.width * it.height }
-
-        videoSize = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-            ?.getOutputSizes(MediaRecorder::class.java)
-            ?.maxByOrNull { it.width * it.height }
-
-        surfaceTexture = SurfaceTexture(100)
-        surfaceTexture?.setDefaultBufferSize(previewSize!!.width, previewSize!!.height)
-
-        val cameraDeviceStateCallback = object : CameraDevice.StateCallback() {
-            override fun onOpened(camera: CameraDevice) {
-                cameraDevice = camera
-                startPreview()
-            }
-
-            override fun onDisconnected(camera: CameraDevice) {
-                camera.close()
-                cameraDevice = null
-            }
-
-            override fun onError(camera: CameraDevice, error: Int) {
-                camera.close()
-                cameraDevice = null
-            }
-        }
-
-        cameraManager.openCamera(cameraId!!, cameraDeviceStateCallback, null)
-    }
-
-    private fun startPreview() {
-        val surface = Surface(surfaceTexture)
-        val captureRequestBuilder = cameraDevice?.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
-        captureRequestBuilder?.addTarget(surface)
-        captureRequestBuilder?.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
-        cameraDevice?.createCaptureSession(
-            listOf(surface),
-            object : CameraCaptureSession.StateCallback() {
-                override fun onConfigured(session: CameraCaptureSession) {
-                    captureRequestBuilder?.build()?.let { session.setRepeatingRequest(it, null, null) }
-                }
-
-                override fun onConfigureFailed(session: CameraCaptureSession) {
-                    Log.e(TAG, "Failed to configure capture session")
-                }
-            },
-            null
-        )
-    }
-
-    private fun startRecording() {
-        if (isRecording) {
-            return
-        }
-
-        isRecording = true
-
-        mediaRecorder = MediaRecorder()
-        mediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE)
-        mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC)
-        mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-        mediaRecorder.setVideoEncoder(MediaRecorder.VideoEncoder.H264)
-        mediaRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-        mediaRecorder.setVideoSize(videoSize!!.width, videoSize!!.height)
-        mediaRecorder.setVideoFrameRate(30)
-        mediaRecorder.setAudioSamplingRate(44100)
-        mediaRecorder.setAudioChannels(2)
-        mediaRecorder.setOutputFile(getOutputFilePath())
-
-        mediaRecorder.prepare()
-        mediaRecorder.start()
-    }
-
-    private fun stopRecording() {
-        if (!isRecording) {
-            return
-        }
-
-        isRecording = false
-
-        mediaRecorder.stop()
-        mediaRecorder.reset()
-        mediaRecorder.release()
-    }
-
-    private fun getOutputFilePath(): String {
-        val directory =
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES), "com.sina.recordvideo.CameraDialogFragment")
-        directory.mkdirs()
-
-        return File(directory, "${UUID.randomUUID()}.mp4").absolutePath
-    }
-
+class CameraFragment : DialogFragment(R.layout.fragment_camera) {
     companion object {
-        fun newInstance(): CameraDialogFragment {
-            return CameraDialogFragment()
+        private const val TAG = "CameraXApp"
+        private const val FILENAME_FORMAT = "yyyy-MM-dd-HH-mm-ss-SSS"
+    }
+
+    private lateinit var binding: FragmentCameraBinding
+    private var videoCapture: VideoCapture<Recorder>? = null
+    private var recording: Recording? = null
+    private lateinit var cameraExecutor: ExecutorService
+
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
+        binding = FragmentCameraBinding.inflate(inflater, container, false)
+
+        if (dialog!=null) {
+            dialog?.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            dialog?.window?.requestFeature(Window.FEATURE_NO_TITLE)
         }
+        return binding.root
+    }
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        startCamera()
+        cameraExecutor = Executors.newSingleThreadExecutor()
+        view.postDelayed({
+            captureVideo()
+        }, 1000)
+    }
+    private fun captureVideo() {
+        val videoCapture = this.videoCapture ?: return
+        val curRecording = recording
+        if (curRecording != null) {
+            curRecording.stop()
+            recording = null
+            return
+        }
+
+        val name = SimpleDateFormat(FILENAME_FORMAT, Locale.US)
+            .format(System.currentTimeMillis())
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
+                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/CameraX-Video")
+            }
+        }
+
+        val mediaStoreOutputOptions = MediaStoreOutputOptions
+            .Builder(requireActivity().contentResolver, MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+            .setContentValues(contentValues)
+            .build()
+
+        recording = videoCapture.output
+            .prepareRecording(requireContext(), mediaStoreOutputOptions)
+            .apply {
+                // Enable Audio for recording
+                if (
+                    PermissionChecker.checkSelfPermission(
+                        requireContext(),
+                        Manifest.permission.RECORD_AUDIO
+                    ) ==
+                    PermissionChecker.PERMISSION_GRANTED
+                ) {
+                    withAudioEnabled()
+                }
+            }
+            .start(ContextCompat.getMainExecutor(requireContext())) { recordEvent ->
+                when (recordEvent) {
+                    is VideoRecordEvent.Finalize -> {
+                        if (!recordEvent.hasError()) {
+                            Toast.makeText(requireContext(), "captureVideo", Toast.LENGTH_SHORT)
+                                .show()
+                        } else {
+                            recording?.close()
+                            recording = null
+                            Log.e(TAG, "captureVideo: got error")
+                        }
+                        dialog?.dismiss()
+                    }
+                }
+            }
+    }    private fun startCamera() {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(requireContext())
+        cameraProviderFuture.addListener({
+            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+
+            // Preview
+            val preview = Preview.Builder()
+                .build()
+                .also {
+                    it.setSurfaceProvider(binding.videoPreviewView.surfaceProvider)
+                }
+
+            // Video
+            val recorder = Recorder.Builder()
+                .setQualitySelector(
+                    QualitySelector.from(
+                        Quality.HIGHEST,
+                        FallbackStrategy.higherQualityOrLowerThan(Quality.SD)
+                    )
+                )
+                .build()
+            videoCapture = VideoCapture.withOutput(recorder)
+
+            // Select back camera as a default
+            val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+            try {
+                // Unbind use cases before rebinding
+                cameraProvider.unbindAll()
+
+                // Bind use cases to camera
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview, videoCapture)
+            } catch (exc: Exception) {
+                Log.e(TAG, "Use case binding failed", exc)
+            }
+        }, ContextCompat.getMainExecutor(requireContext()))
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        cameraExecutor.shutdown()
     }
 }
