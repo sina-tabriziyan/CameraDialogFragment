@@ -1,8 +1,0 @@
-class CaptureViewModel : ViewModel() {
-    private val _isPermissionGranted = MutableLiveData(false)
-    val isPermissionGranted: LiveData<Boolean> = _isPermissionGranted
-
-    fun setPermission(isGranted: Boolean) {
-        _isPermissionGranted.value = isGranted
-    }
-}
