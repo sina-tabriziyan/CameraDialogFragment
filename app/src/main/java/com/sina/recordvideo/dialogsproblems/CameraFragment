@@ -1,0 +1,203 @@
+package com.teamyar.presentation.chatFr.cameraFr
+
+import android.Manifest
+import android.content.ContentValues
+import android.content.Context
+import android.graphics.Color
+import android.os.Bundle
+import android.os.CountDownTimer
+import android.util.Log
+import android.view.LayoutInflater
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
+import android.widget.Toast
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FallbackStrategy
+import androidx.camera.video.Quality
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.Recorder
+import androidx.camera.video.Recording
+import androidx.camera.video.VideoCapture
+import androidx.camera.video.VideoRecordEvent
+import androidx.core.content.ContextCompat
+import androidx.core.content.PermissionChecker
+import androidx.databinding.DataBindingUtil
+import com.blankj.utilcode.util.SnackbarUtils.dismiss
+import com.google.common.util.concurrent.ListenableFuture
+import com.mikhaellopez.circularprogressbar.CircularProgressBar
+import com.teamyar.R
+import com.teamyar.core.utils.files.createVideoContentValues
+import com.teamyar.core.utils.files.createVideoStoreOutputOptions
+import com.teamyar.databinding.FragmentCameraBinding
+import com.teamyar.presentation.base.BaseFr
+import com.teamyar.presentation.chatFr.chatDetailFr.ChatDetailVm
+import timber.log.Timber
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import javax.inject.Inject
+
+class CameraFragment : BaseFr() {
+    private lateinit var binding: FragmentCameraBinding
+    private var isRecording = false
+    private var videoCapture: VideoCapture<Recorder>? = null
+    private var recording: Recording? = null
+    private lateinit var cameraExecutor: ExecutorService
+    private lateinit var cameraProviderFuture: ListenableFuture<ProcessCameraProvider>
+    private lateinit var progressBar: CircularProgressBar
+    private lateinit var countDownTimer: CountDownTimer
+
+    @Inject
+    lateinit var viewModel: ChatDetailVm
+    override fun onAttach(context: Context) {
+        super.onAttach(context)
+        baseActivityComponent.inject(this)
+    }
+
+    private fun startRecording() {
+        countDownTimer.start()
+        captureVideo()
+    }
+
+    private fun stopRecording() {
+        countDownTimer.cancel()
+        recording?.stop()
+    }
+
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
+        binding = DataBindingUtil.inflate(inflater, R.layout.fragment_camera, container, false)
+        binding.mainLayout.setBackgroundColor(Color.parseColor("#00ff0000"))
+        progressBar = binding.progressBar
+        return binding.root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        cameraExecutor = Executors.newSingleThreadExecutor()
+        startCamera()
+        binding.mainLayout.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    Log.e("TAG", "onViewCreated: ACTION_DOWN")
+                    // Touch down, start recording
+                    if (!isRecording) {
+                        startRecording()
+                        isRecording = true
+                    }
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    Log.e("TAG", "onViewCreated: ACTION_UP")
+
+                    // Touch released, stop recording
+                    if (isRecording) {
+                        stopRecording()
+                        isRecording = false
+                    }
+                }
+            }
+            true
+        }
+        binding.progressBar.progressMax = 60f
+        countDownTimer = object : CountDownTimer(60000, 1000) {
+            override fun onTick(millisUntilFinished: Long) {
+                val secondsRemaining = (millisUntilFinished / 1000).toInt()
+                progressBar.apply {
+                    setProgressWithAnimation((60 - secondsRemaining).toFloat(), 1000)
+                }
+            }
+
+            override fun onFinish() {
+                stopRecording()
+            }
+        }
+    }
+
+    private fun startCamera() {
+        cameraProviderFuture = ProcessCameraProvider.getInstance(requireContext())
+        cameraProviderFuture.addListener({
+            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+
+            // Preview
+            val preview = Preview.Builder()
+                .build()
+                .also { it.setSurfaceProvider(binding.preview.surfaceProvider) }
+
+            // Video
+            val recorder = Recorder.Builder()
+                .setQualitySelector(
+                    QualitySelector.from(
+                        Quality.HIGHEST,
+                        FallbackStrategy.higherQualityOrLowerThan(Quality.SD)
+                    )
+                )
+                .build()
+            videoCapture = VideoCapture.withOutput(recorder)
+
+            // Select back camera as a default
+            val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+            try {
+                // Unbind use cases before rebinding
+                cameraProvider.unbindAll()
+
+                // Bind use cases to camera
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview, videoCapture)
+            } catch (exc: Exception) {
+                Timber.e("TAG", "Use case binding failed", exc)
+            }
+        }, ContextCompat.getMainExecutor(requireContext()))
+    }
+
+    private fun captureVideo() {
+        val videoCapture = this.videoCapture ?: return
+        val curRecording = recording
+        if (curRecording != null) {
+            curRecording.stop()
+            recording = null
+            return
+        }
+
+        recording = videoCapture.output
+            .prepareRecording(
+                requireContext(),
+                requireContext().contentResolver.createVideoStoreOutputOptions(
+                    ContentValues().createVideoContentValues()
+                )
+            )
+            .apply {
+                // Enable Audio for recording
+                if (
+                    ContextCompat.checkSelfPermission(
+                        requireContext(),
+                        Manifest.permission.RECORD_AUDIO
+                    ) ==
+                    PermissionChecker.PERMISSION_GRANTED
+                ) {
+                    withAudioEnabled()
+                }
+            }
+            .start(ContextCompat.getMainExecutor(requireContext())) { recordEvent ->
+                when (recordEvent) {
+                    is VideoRecordEvent.Finalize -> {
+                        if (!recordEvent.hasError()) {
+                            Timber.tag("TAG").e("captureVideo:success")
+                            Toast.makeText(requireContext(), "captureVideo", Toast.LENGTH_SHORT).show()
+                        } else {
+                            recording?.close()
+                            recording = null
+                            Timber.tag("TAG").e("captureVideo: got error")
+                        }
+                        dismiss()
+                    }
+                }
+            }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        cameraExecutor.shutdown()
+    }
+
+}
