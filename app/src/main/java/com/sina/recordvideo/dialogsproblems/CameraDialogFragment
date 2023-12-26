@@ -1,0 +1,139 @@
+package com.teamyar.core.ui.dialog
+
+import android.Manifest
+import android.content.ContentValues
+import android.graphics.drawable.ColorDrawable
+import android.os.Bundle
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.Toast
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FallbackStrategy
+import androidx.camera.video.Quality
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.Recorder
+import androidx.camera.video.Recording
+import androidx.camera.video.VideoCapture
+import androidx.camera.video.VideoRecordEvent
+import androidx.core.content.ContextCompat
+import androidx.core.content.PermissionChecker
+import androidx.fragment.app.DialogFragment
+import com.google.common.util.concurrent.ListenableFuture
+import com.teamyar.R
+import com.teamyar.core.utils.files.createVideoContentValues
+import com.teamyar.core.utils.files.createVideoStoreOutputOptions
+import com.teamyar.databinding.DialogCameraBinding
+import timber.log.Timber
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+
+class CameraDialog : DialogFragment(R.layout.dialog_camera) {
+    companion object {
+        private const val TAG = "CameraXApp"
+    }
+
+    private lateinit var binding: DialogCameraBinding
+    private var videoCapture: VideoCapture<Recorder>? = null
+    private var recording: Recording? = null
+    private lateinit var cameraExecutor: ExecutorService
+    private lateinit var cameraProviderFuture: ListenableFuture<ProcessCameraProvider>
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
+        binding = DialogCameraBinding.inflate(inflater, container, false)
+        dialog?.window?.setBackgroundDrawable(ColorDrawable(0x00ffffff))
+        return binding.root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        view.post { startCamera() }
+        view.postDelayed({ captureVideo() }, 1000)
+        cameraExecutor = Executors.newSingleThreadExecutor()
+    }
+
+    private fun startCamera() {
+        cameraProviderFuture = ProcessCameraProvider.getInstance(requireContext())
+        cameraProviderFuture.addListener({
+            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+
+            // Preview
+            val preview = Preview.Builder()
+                .build()
+                .also { it.setSurfaceProvider(binding.preview.surfaceProvider) }
+            preview.targetRotation = requireActivity().windowManager.defaultDisplay.rotation
+            // Video
+            val recorder = Recorder.Builder()
+                .setQualitySelector(
+                    QualitySelector.from(
+                        Quality.HIGHEST,
+                        FallbackStrategy.higherQualityOrLowerThan(Quality.SD)
+                    )
+                )
+                .build()
+            videoCapture = VideoCapture.withOutput(recorder)
+
+            // Select back camera as a default
+            val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+            try {
+                // Unbind use cases before rebinding
+                cameraProvider.unbindAll()
+
+                // Bind use cases to camera
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview, videoCapture)
+            } catch (exc: Exception) {
+                Timber.e("TAG", "Use case binding failed", exc)
+            }
+        }, ContextCompat.getMainExecutor(requireContext()))
+    }
+
+    private fun captureVideo() {
+        val videoCapture = this.videoCapture ?: return
+        val curRecording = recording
+        if (curRecording != null) {
+            curRecording.stop()
+            recording = null
+            return
+        }
+
+        recording = videoCapture.output
+            .prepareRecording(
+                requireContext(),
+                requireActivity().contentResolver.createVideoStoreOutputOptions(
+                    ContentValues().createVideoContentValues()
+                )
+            )
+            .apply {
+                // Enable Audio for recording
+                if (
+                    PermissionChecker.checkSelfPermission(
+                        requireContext(),
+                        Manifest.permission.RECORD_AUDIO
+                    ) ==
+                    PermissionChecker.PERMISSION_GRANTED
+                ) {
+                    withAudioEnabled()
+                }
+            }
+            .start(ContextCompat.getMainExecutor(requireContext())) { recordEvent ->
+                when (recordEvent) {
+                    is VideoRecordEvent.Finalize -> {
+                        if (!recordEvent.hasError())
+                            Toast.makeText(requireContext(), "captureVideo", Toast.LENGTH_SHORT).show()
+                        else {
+                            recording?.close()
+                            recording = null
+                            Timber.tag("TAG").e("captureVideo: got error")
+                        }
+                        dialog?.dismiss()
+                    }
+                }
+            }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        cameraExecutor.shutdown()
+    }
+}
