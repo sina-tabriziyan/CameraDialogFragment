@@ -1,0 +1,103 @@
+package com.example.cameraguide.ui
+
+import android.app.Dialog
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.os.Bundle
+import android.util.Log
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FallbackStrategy
+import androidx.camera.video.Quality
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.Recorder
+import androidx.camera.video.VideoCapture
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.DialogFragment
+import com.example.cameraguide.R
+import com.example.cameraguide.databinding.DialogVideoBinding
+import com.google.common.util.concurrent.ListenableFuture
+
+class DialogVideo : DialogFragment(R.layout.dialog_video) {
+
+    private lateinit var binding: DialogVideoBinding
+    private lateinit var cameraProviderFuture: ListenableFuture<ProcessCameraProvider>
+    private var videoCapture: VideoCapture<Recorder>? = null
+
+    override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+        val dialog = Dialog(requireContext())
+        dialog.setContentView(R.layout.dialog_video)
+
+        // Set the desired width and height for the dialog
+        val width = resources.getDimensionPixelSize(R.dimen.dialog_width)
+        val height = resources.getDimensionPixelSize(R.dimen.dialog_height)
+
+        // Set the width and height of the dialog window
+        dialog.window?.setLayout(width, height)
+
+        return dialog
+    }
+
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View? {
+        binding = DialogVideoBinding.inflate(inflater, container, false)
+
+        return binding.root
+    }
+
+    override fun onStart() {
+        super.onStart()
+        dialog?.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+//        view.post { startCamera() }
+    }
+
+//    private fun startCamera() {
+//        cameraProviderFuture = ProcessCameraProvider.getInstance(requireContext())
+//        cameraProviderFuture.addListener({
+//            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
+//
+//            // Preview
+//            val preview = Preview.Builder()
+//                .build()
+//                .also {
+//                    it.setSurfaceProvider(binding.cameraView.surfaceProvider)
+//                }
+//            preview.targetRotation = requireActivity().windowManager.defaultDisplay.rotation
+//            // Video
+//            val recorder = Recorder.Builder()
+//                .setQualitySelector(
+//                    QualitySelector.from(
+//                        Quality.HIGHEST,
+//                        FallbackStrategy.higherQualityOrLowerThan(Quality.SD)
+//                    )
+//                )
+//                .build()
+//            videoCapture = VideoCapture.withOutput(recorder)
+//
+//            // Select back camera as a default
+//            val cameraSelector = CameraSelector.DEFAULT_FRONT_CAMERA
+//            try {
+//                // Unbind use cases before rebinding
+//                cameraProvider.unbindAll()
+//
+//                // Bind use cases to camera
+//                cameraProvider.bindToLifecycle(this, cameraSelector, preview, videoCapture)
+//            } catch (exc: Exception) {
+//                Log.e("TAG", "Use case binding failed", exc)
+//            }
+//        }, ContextCompat.getMainExecutor(requireContext()))
+//    }
+
+
+}
